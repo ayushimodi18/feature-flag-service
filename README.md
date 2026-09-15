@@ -38,6 +38,12 @@ Use PostgreSQL by setting environment variables:
 DB_URL=jdbc:postgresql://localhost:5432/flags DB_USER=postgres DB_PASSWORD=secret mvn spring-boot:run
 ```
 
+## Live demo
+```bash
+./demo.sh                         # against the DigitalOcean app
+./demo.sh http://localhost:8080   # against a local run
+```
+
 ## Test
 ```bash
 mvn verify
