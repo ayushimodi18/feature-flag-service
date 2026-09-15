@@ -5,6 +5,8 @@
 A production-style REST API to create feature flags, toggle them globally or per user,
 and evaluate whether a feature is enabled for a given user, with caching on the hot read path.
 
+**Live demo:** https://feature-flag-service-cq939.ondigitalocean.app/actuator/health
+
 **Architecture and request lifecycle diagrams:** [docs/architecture.md](docs/architecture.md)
 
 ## Tech stack
