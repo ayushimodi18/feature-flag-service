@@ -13,7 +13,10 @@ Caffeine cache · Bean Validation · JUnit 5 + MockMvc + Mockito · GitHub Actio
 
 ## Evaluation rule
 1. If the user has an override for the flag, use it (`reason: USER_OVERRIDE`).
-2. Otherwise use the flag's global state (`reason: GLOBAL`). The global state starts at `defaultEnabled`.
+2. If the flag is globally OFF, it is off for everyone (`reason: GLOBAL`).
+3. If the flag is ON with rollout 100% (the default), it is on for everyone (`reason: GLOBAL`).
+4. If the flag is ON with rollout X%, the user is enabled when `CRC32(flag + ":" + userId) % 100 < X` (`reason: ROLLOUT`).
+   The hash is deterministic, so a user never flips between states, and each flag targets a different slice of users.
 
 ## Run locally
 Requires Java 21 and Maven 3.9+.
@@ -37,8 +40,8 @@ DB_URL=jdbc:postgresql://localhost:5432/flags DB_USER=postgres DB_PASSWORD=secre
 ```bash
 mvn verify
 ```
-17 tests: 13 MockMvc integration tests (status codes, validation, precedence,
-cache invalidation) and 4 Mockito unit tests for the service logic.
+26 tests: 17 MockMvc integration tests (status codes, validation, precedence,
+cache invalidation, rollout) and 9 unit tests (service logic, rollout bucketing and distribution).
 CI runs these on every push, then builds the Docker image.
 
 ## API
@@ -47,10 +50,11 @@ Base path: `/api/v1`
 
 | Method | Path | Body | Success | Errors |
 |---|---|---|---|---|
-| POST | `/flags` | `{name, description?, defaultEnabled}` | 201 + `Location` | 400 invalid, 409 duplicate |
+| POST | `/flags` | `{name, description?, defaultEnabled, rolloutPercentage?}` | 201 + `Location` | 400 invalid, 409 duplicate |
 | GET | `/flags` | – | 200 | – |
 | GET | `/flags/{name}` | – | 200 | 404 |
 | PUT | `/flags/{name}/global` | `{enabled}` | 200 | 400, 404, 409 concurrent |
+| PUT | `/flags/{name}/rollout` | `{percentage}` (0-100) | 200 | 400, 404 |
 | PUT | `/flags/{name}/users/{userId}` | `{enabled}` | 200 (upsert) | 400, 404 |
 | DELETE | `/flags/{name}/users/{userId}` | – | 204 | 404 |
 | DELETE | `/flags/{name}` | – | 204 | 404 |
@@ -92,6 +96,8 @@ Health and cache stats: `GET /actuator/health`, `GET /actuator/caches`
   Race conditions return 409 instead of 500.
 - **Layering:** Controller (HTTP and validation) → Service (rules and cache) → Repository (JPA).
   DTOs are separate from entities.
+- **Percentage rollout:** a gradual release (e.g. 10%, then 50%, then 100%) using deterministic CRC32 bucketing; no per-user state is stored.
+  A rollout change evicts all cached evaluations.
 - **Bulk endpoint:** `/users/{userId}/flags` loads all flags in 2 queries (no N+1), which suits SDK startup.
 
 ## Project structure
@@ -108,7 +114,7 @@ src/main/java/com/example/featureflags
 ## Limitations and next steps
 - **Multi-instance caching:** the local cache isn't shared. Use Redis, or pub/sub invalidation.
 - **Authentication:** add API keys or OAuth, with separate admin and evaluation scopes.
-- **Targeting:** percentage rollouts (hash of userId), user segments, and scheduled toggles.
+- **Targeting:** user segments (e.g. country, plan) and scheduled toggles.
 - **Audit log:** record who changed what and when.
 - **Schema migrations:** use Flyway instead of `ddl-auto`.
 - **Pagination:** add it to `GET /flags`.

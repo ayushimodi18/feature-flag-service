@@ -14,15 +14,18 @@ public final class Dtos {
                      message = "must be lowercase letters, digits, '-' or '_' (max 64 chars)")
             String name,
             @Size(max = 255) String description,
-            @NotNull Boolean defaultEnabled) {}
+            @NotNull Boolean defaultEnabled,
+            @Min(0) @Max(100) Integer rolloutPercentage) {}   // optional, defaults to 100
 
     public record ToggleRequest(@NotNull Boolean enabled) {}
 
+    public record RolloutRequest(@NotNull @Min(0) @Max(100) Integer percentage) {}
+
     public record FlagResponse(String name, String description, boolean enabled,
-                               Instant createdAt, Instant updatedAt) {
+                               int rolloutPercentage, Instant createdAt, Instant updatedAt) {
         public static FlagResponse from(FeatureFlag f) {
             return new FlagResponse(f.getName(), f.getDescription(), f.isEnabled(),
-                                    f.getCreatedAt(), f.getUpdatedAt());
+                                    f.getRolloutPercentage(), f.getCreatedAt(), f.getUpdatedAt());
         }
     }
 

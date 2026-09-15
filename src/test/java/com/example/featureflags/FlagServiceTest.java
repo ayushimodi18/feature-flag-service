@@ -67,7 +67,7 @@ class FlagServiceTest {
     @Test
     void create_duplicateThrowsConflict() {
         when(flags.existsByName("f")).thenReturn(true);
-        assertThatThrownBy(() -> service.create(new CreateFlagRequest("f", null, true)))
+        assertThatThrownBy(() -> service.create(new CreateFlagRequest("f", null, true, null)))
                 .isInstanceOf(ConflictException.class);
         verify(flags, never()).save(any());
     }

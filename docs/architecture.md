@@ -38,7 +38,7 @@ sequenceDiagram
             S-->>C: 404 ProblemDetail (not cached)
         end
         S->>DB: find override (flagId, u1)
-        S->>S: override present ? override : global
+        S->>S: override? -> use it<br/>global OFF? -> false<br/>else rollout bucket < % ?
         S->>K: put "name:u1"
     end
     S-->>C: 200 {flag, userId, enabled, reason}
@@ -68,7 +68,8 @@ sequenceDiagram
 
 | Decision | Why | Trade-off |
 |---|---|---|
-| Precedence: user override > global | Simple, predictable rule for targeting | No segments / percentage rollout yet |
+| Precedence: user override > global OFF > % rollout | Predictable rule; overrides allow beta testers | No segment targeting yet |
+| CRC32(flag:userId) % 100 bucketing | Deterministic, stateless, a different slice per flag | Hash is not cryptographic (fine for bucketing) |
 | Cache evaluation results, key `flag:userId` | Evaluation is the hot read path | Many keys per flag |
 | Evict all on global change | Always correct, simple | Brief cache miss spike after global toggles |
 | Evict after commit | Prevents concurrent reads re-caching stale data | Needs transaction-aware cache manager |

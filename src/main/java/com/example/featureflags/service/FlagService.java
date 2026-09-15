@@ -14,9 +14,11 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.zip.CRC32;
 
 import static com.example.featureflags.config.CacheConfig.EVAL_CACHE;
 
@@ -25,6 +27,7 @@ public class FlagService {
 
     public static final String REASON_OVERRIDE = "USER_OVERRIDE";
     public static final String REASON_GLOBAL = "GLOBAL";
+    public static final String REASON_ROLLOUT = "ROLLOUT";
 
     private final FeatureFlagRepository flags;
     private final UserOverrideRepository overrides;
@@ -41,7 +44,8 @@ public class FlagService {
         if (flags.existsByName(req.name())) {
             throw new ConflictException("Flag '%s' already exists".formatted(req.name()));
         }
-        return flags.save(new FeatureFlag(req.name(), req.description(), req.defaultEnabled()));
+        int rollout = req.rolloutPercentage() == null ? 100 : req.rolloutPercentage();
+        return flags.save(new FeatureFlag(req.name(), req.description(), req.defaultEnabled(), rollout));
     }
 
     @Transactional(readOnly = true)
@@ -74,6 +78,15 @@ public class FlagService {
         return flags.saveAndFlush(f);
     }
 
+    /** Rollout change affects many users -> evict all cached evaluations. */
+    @Transactional
+    @CacheEvict(cacheNames = EVAL_CACHE, allEntries = true)
+    public FeatureFlag setRollout(String name, int percentage) {
+        FeatureFlag f = get(name);
+        f.setRolloutPercentage(percentage);
+        return flags.saveAndFlush(f);
+    }
+
     /** Upsert a per-user override -> evict only that user's entry. */
     @Transactional
     @CacheEvict(cacheNames = EVAL_CACHE, key = "#name + ':' + #userId")
@@ -98,7 +111,7 @@ public class FlagService {
     // ---------- Evaluation ----------
 
     /**
-     * Precedence: user override > global state.
+     * Precedence: user override > global OFF > percentage rollout.
      * Cache hit: O(1). Cache miss: 2 indexed DB lookups, then the result is cached.
      * Not @Transactional on purpose: a cache hit should not open a DB transaction.
      * Unknown flag throws 404, and exceptions are never cached.
@@ -106,9 +119,11 @@ public class FlagService {
     @Cacheable(cacheNames = EVAL_CACHE, key = "#name + ':' + #userId")
     public EvaluationResponse evaluate(String name, String userId) {
         FeatureFlag f = get(name);
-        return overrides.findByFlagIdAndUserId(f.getId(), userId)
-                .map(o -> new EvaluationResponse(name, userId, o.isEnabled(), REASON_OVERRIDE))
-                .orElseGet(() -> new EvaluationResponse(name, userId, f.isEnabled(), REASON_GLOBAL));
+        Optional<UserOverride> override = overrides.findByFlagIdAndUserId(f.getId(), userId);
+        if (override.isPresent()) {
+            return new EvaluationResponse(name, userId, override.get().isEnabled(), REASON_OVERRIDE);
+        }
+        return evaluateWithoutOverride(f, userId);
     }
 
     /** Bulk evaluation for SDK bootstrap: 2 queries total, no N+1. */
@@ -119,8 +134,28 @@ public class FlagService {
         Map<String, Boolean> result = new LinkedHashMap<>();
         for (FeatureFlag f : list()) {
             UserOverride o = byFlag.get(f.getId());
-            result.put(f.getName(), o != null ? o.isEnabled() : f.isEnabled());
+            boolean enabled = (o != null) ? o.isEnabled() : evaluateWithoutOverride(f, userId).enabled();
+            result.put(f.getName(), enabled);
         }
         return result;
+    }
+
+    private EvaluationResponse evaluateWithoutOverride(FeatureFlag f, String userId) {
+        if (!f.isEnabled()) {
+            return new EvaluationResponse(f.getName(), userId, false, REASON_GLOBAL);
+        }
+        int pct = f.getRolloutPercentage();
+        if (pct >= 100) {
+            return new EvaluationResponse(f.getName(), userId, true, REASON_GLOBAL);
+        }
+        boolean inRollout = bucket(f.getName(), userId) < pct;
+        return new EvaluationResponse(f.getName(), userId, inRollout, REASON_ROLLOUT);
+    }
+
+    /** Deterministic bucket 0..99: the same user always lands in the same bucket for a flag. */
+    public static int bucket(String flagName, String userId) {
+        CRC32 crc = new CRC32();
+        crc.update((flagName + ":" + userId).getBytes(StandardCharsets.UTF_8));
+        return (int) (crc.getValue() % 100);
     }
 }

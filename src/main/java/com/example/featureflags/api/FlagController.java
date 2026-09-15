@@ -47,6 +47,12 @@ public class FlagController {
         return FlagResponse.from(service.setGlobal(name, req.enabled()));
     }
 
+    @PutMapping("/{name}/rollout")
+    public FlagResponse setRollout(@PathVariable String name,
+                                   @Valid @RequestBody RolloutRequest req) {
+        return FlagResponse.from(service.setRollout(name, req.percentage()));
+    }
+
     @PutMapping("/{name}/users/{userId}")
     public OverrideResponse setUserOverride(@PathVariable String name,
                                             @PathVariable @NotBlank @Size(max = 128) String userId,
