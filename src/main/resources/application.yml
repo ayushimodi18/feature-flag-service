@@ -1,0 +1,23 @@
+server:
+  port: ${PORT:8080}
+spring:
+  application:
+    name: feature-flag-service
+  datasource:
+    url: ${DB_URL:jdbc:h2:file:./data/flags;AUTO_SERVER=TRUE}
+    username: ${DB_USER:sa}
+    password: ${DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  cache:
+    type: caffeine
+    cache-names: evaluations
+    caffeine:
+      spec: maximumSize=10000,expireAfterWrite=60s
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,caches
